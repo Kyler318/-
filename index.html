@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>末日代碼：邏輯深潛 (Expert Mode)</title>
+    <style>
+        /* --- 0. 全局設定 --- */
+        :root {
+            --bg-color: #0b0c15;
+            --panel-bg: #151725;
+            --border: #2a2d3e;
+            --cyan: #00f0ff;
+            --purple: #bd00ff;
+            --green: #00ff9f;
+            --yellow: #fce300;
+            --red: #ff2a2a;
+            --text: #e0e6ed;
+        }
+
+        * { box-sizing: border-box; user-select: none; }
+
+        body {
+            font-family: 'Segoe UI', 'Consolas', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            margin: 0; height: 100vh; display: flex; overflow: hidden;
+        }
+
+        /* --- 1. 左側編輯區 --- */
+        .editor-panel {
+            width: 50%; background: var(--panel-bg); border-right: 2px solid var(--border);
+            display: flex; flex-direction: column;
+        }
+        
+        .header {
+            padding: 15px; background: #0f101a; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .title { color: var(--cyan); font-weight: bold; letter-spacing: 1.5px; }
+        .level-badge { background: #222; padding: 5px 10px; border-radius: 4px; color: var(--yellow); font-size: 0.9rem; }
+
+        .workspace {
+            flex: 1; padding: 30px; overflow-y: auto;
+            background-image: radial-gradient(#23263a 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .main-loop {
+            border: 3px solid var(--yellow); border-radius: 10px;
+            background: rgba(252, 227, 0, 0.05);
+            min-height: 250px; padding: 45px 15px 15px 15px;
+            position: relative; display: flex; flex-direction: column; gap: 10px;
+        }
+        .main-loop-label {
+            position: absolute; top: 0; left: 0; background: var(--yellow); color: #000;
+            font-weight: bold; padding: 5px 15px; border-bottom-right-radius: 10px;
+        }
+
+        /* --- 積木與分支樣式 --- */
+        .block-struct {
+            border-radius: 8px; padding: 5px; display: flex; flex-direction: column; gap: 2px;
+            margin-bottom: 5px; border-left: 5px solid;
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.4);
+            transition: all 0.2s;
+            position: relative;
+        }
+        .struct-if { background: #151922; border-color: var(--cyan); }
+        .struct-while { background: #251a2e; border-color: var(--purple); padding: 8px; }
+
+        .branch-row {
+            display: flex; flex-direction: column; gap: 5px;
+            padding: 5px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            position: relative;
+        }
+        .branch-row:last-child { border-bottom: none; }
+
+        .block-header { 
+            display: flex; align-items: center; gap: 10px; font-size: 0.9rem; 
+            font-family: monospace; padding-bottom: 5px; position: relative;
+        }
+        
+        .block-body {
+            min-height: 50px; background: rgba(0,0,0,0.3); border-radius: 5px;
+            padding: 8px; border: 1px dashed #444;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .block-body.drag-hover { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
+
+        .trash-btn { 
+            margin-left: auto; cursor: pointer; color: #666; font-size: 1.2rem; font-weight: bold; padding: 2px 8px; position: relative; z-index: 10;
+        }
+        .trash-btn:hover { color: var(--red); background: rgba(255,0,0,0.1); border-radius: 4px; }
+
+        .add-elif-btn {
+            background: rgba(0, 240, 255, 0.1); border: 1px dashed var(--cyan); color: var(--cyan);
+            padding: 5px; cursor: pointer; text-align: center; font-size: 0.8rem; border-radius: 4px;
+            margin: 5px; transition: 0.2s;
+        }
+        .add-elif-btn:hover { background: rgba(0, 240, 255, 0.2); }
+
+        .slot {
+            display: inline-flex; min-width: 110px; height: 32px;
+            background: #000; border: 1px dashed #555; border-radius: 4px;
+            align-items: center; justify-content: center; color: #666; font-size: 0.8rem;
+            padding: 0 10px;
+        }
+        .slot.drag-hover { border-color: var(--green); background: rgba(0, 255, 159, 0.1); }
+        .slot.filled { border-style: solid; border-color: #888; }
+
+        .toolbox { height: 200px; background: #0f101a; border-top: 2px solid var(--border); display: flex; flex-direction: column; }
+        .tabs { display: flex; background: #000; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; color: #666; border-bottom: 3px solid transparent; }
+        .tab.active { color: #fff; border-bottom-color: var(--cyan); background: #1a1d2b; }
+        .tools-content { flex: 1; display: none; padding: 15px; overflow-x: auto; gap: 15px; align-items: center; }
+        .tools-content.active { display: flex; }
+
+        .chip {
+            padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: grab;
+            display: flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 0.9rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
+            position: relative;
+        }
+        .chip:active { transform: scale(0.95); cursor: grabbing; }
+        .c-flow { background: #2a2d3e; color: #fff; border-color: #fff; }
+        .c-sensor { background: #0d2829; color: var(--cyan); border-color: var(--cyan); }
+        .c-action { background: #2b111a; color: var(--red); border-color: var(--red); }
+
+        /* --- 右側 --- */
+        .stage { width: 50%; background: #000; display: flex; flex-direction: column; position: relative; }
+        .view-port { flex: 1; position: relative; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        
+        .scanner-frame {
+            width: 100px; height: 100px; border: 3px solid var(--green); border-radius: 15px;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10; pointer-events: none;
+            box-shadow: 0 0 30px rgba(0, 255, 159, 0.2);
+            background: rgba(0, 255, 159, 0.05);
+            display: flex; justify-content: center; align-items: center;
+        }
+        .drone-icon { font-size: 3.5rem; filter: drop-shadow(0 0 10px var(--green)); position: relative; top: -5px; }
+        
+        .belt {
+            position: absolute; top: 50%; left: 50%; 
+            margin-top: -40px; margin-left: -40px; 
+            display: flex; gap: 20px;
+            transition: transform 0.4s cubic-bezier(0.2, 1, 0.3, 1);
+        }
+
+        .cell {
+            width: 80px; height: 80px;
+            background: #111; border: 2px solid #333; border-radius: 10px;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 2.5rem; position: relative; flex-shrink: 0;
+        }
+        
+        .hp-bar { position: absolute; top: -15px; left: 0; width: 100%; height: 6px; background: #333; display: none; border-radius: 3px; overflow: hidden; }
+        .hp-val { width: 100%; height: 100%; background: var(--red); transition: width 0.2s; }
+        .status-badge { position: absolute; bottom: -10px; right: -10px; font-size: 1rem; background: #000; border-radius: 50%; padding: 2px; }
+
+        .console {
+            height: 160px; background: #08080c; border-top: 1px solid #333; padding: 15px;
+            font-family: 'Consolas', monospace; font-size: 0.9rem; color: #888; overflow-y: auto;
+        }
+        .log-line { margin-bottom: 5px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .l-ok { color: var(--green); } .l-err { color: var(--red); } .l-warn { color: var(--yellow); }
+
+        .controls { padding: 15px; display: flex; gap: 10px; background: #0f101a; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-run { background: var(--cyan); color: #000; }
+        .btn-run:hover { background: #fff; box-shadow: 0 0 15px var(--cyan); }
+        .btn-reset { background: #333; color: #fff; }
+
+        .modal-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100; display: flex; justify-content: center; align-items: center; }
+        .modal { background: #151725; border: 2px solid var(--cyan); padding: 40px; border-radius: 15px; max-width: 700px; width: 90%; text-align: center; box-shadow: 0 0 50px rgba(0, 240, 255, 0.2); }
+        .modal h2 { color: var(--cyan); font-size: 1.8rem; margin-top: 0; }
+        .modal-content { text-align: left; margin: 20px 0; color: #ddd; font-size: 1.1rem; line-height: 1.6; }
+        .concept-box { background: rgba(0, 240, 255, 0.1); padding: 15px; border-left: 4px solid var(--cyan); margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+<div id="modal" class="modal-mask">
+    <div class="modal">
+        <h2 id="m-title">任務簡報</h2>
+        <div id="m-content" class="modal-content"></div>
+        <button class="btn btn-run" onclick="closeModal()" style="margin-top:20px; width: 200px;">收到，開始任務</button>
+    </div>
+</div>
+
+<div class="editor-panel">
+    <div class="header">
+        <div class="title">DRONE COMMAND // 邏輯深潛 (Expert)</div>
+        <div class="level-badge" id="lvl-display">Level 1</div>
+    </div>
+    
+    <div class="workspace">
+        <div class="main-loop" id="root-container" data-type="container">
+            <div class="main-loop-label">MAIN LOOP (無限重複)</div>
+            <div id="hint-text" style="color:#555; text-align:center; padding-top:80px; pointer-events:none;">
+                將 [結構積木] 拖曳至此處<br>建立你的邏輯樹
+            </div>
+        </div>
+    </div>
+
+    <div class="toolbox">
+        <div class="tabs">
+            <div class="tab active" onclick="setTab('struct')">1. 結構 (Flow)</div>
+            <div class="tab" onclick="setTab('sensor')">2. 感測 (Inputs)</div>
+            <div class="tab" onclick="setTab('action')">3. 動作 (Outputs)</div>
+        </div>
+        
+        <div class="tools-content active" id="t-struct"></div>
+        <div class="tools-content" id="t-sensor"></div>
+        <div class="tools-content" id="t-action"></div>
+    </div>
+</div>
+
+<div class="stage">
+    <div class="view-port">
+        <div class="scanner-frame"><div class="drone-icon">🛸</div></div>
+        <div class="belt" id="belt"></div>
+    </div>
+    <div class="console" id="console">
+        <div class="log-line">> System initialized...</div>
+    </div>
+    <div class="controls">
+        <button class="btn btn-reset" onclick="resetLevel()">重置系統</button>
+        <button class="btn btn-run" onclick="runCode()">執行程式 (EXECUTE)</button>
+    </div>
+</div>
+
+<script>
+    // --- 關卡數據 (Level 6, 7, 8 為新增關卡) ---
+    const LEVELS = [
+        {
+            id: 1, title: "L1: 基礎判斷",
+            concept: "工具介紹：如果...否則...",
+            desc: "前方道路上有 <b>浮石(🪨)</b> 阻擋，你需要讓無人機做出正確的反應。",
+            detail: "<div class='concept-box'>使用 <b>如果 (IF)</b> 積木來檢查感測器條件。<br>當條件成立時，會執行積木內部的動作；<br>如果條件不成立，則執行 <b>ELSE (否則)</b> 區塊中的動作。</div>",
+            map: [0, 1, 0, 1, 0, 0, 9], 
+            tools: { struct:['if'], sensor:['rock'], action:['move','jump'] }
+        },
+        {
+            id: 2, title: "L2: 多分支判斷",
+            concept: "工具介紹：否則如果 (Else If)",
+            desc: "這次除了浮石，還有 <b>敵機(👾)</b>！<br>遇到敵機需要攻擊，遇到浮石需要跳躍。",
+            detail: "<div class='concept-box'>當情況不止一種時，點擊 <b>[+否則如果]</b> 按鈕增加分支。<br>系統會依序檢查：<br>1. 是 A 情況嗎？(執行 A 動作)<br>2. 否則，是 B 情況嗎？(執行 B 動作)<br>3. 都不是？(執行 ELSE 動作)</div>",
+            map: [0, 2, 0, 1, 2, 0, 9], 
+            tools: { struct:['if'], sensor:['rock','enemy'], action:['move','jump','laser'] }
+        },
+        {
+            id: 3, title: "L3: 顏色辨識",
+            concept: "工具介紹：感測器匹配",
+            desc: "前方有 <b>紅門(🔴)</b> 與 <b>藍門(🔵)</b>，必須使用對應顏色的鑰匙卡才能通過。",
+            detail: "<div class='concept-box'>感測器現在可以區分不同類型的物件了。<br>請觀察感測器清單，確保你的「條件」(如：紅門) 與你的「動作」(如：使用紅卡) 是正確對應的。</div>",
+            map: [0, 3, 0, 4, 3, 0, 9],
+            tools: { struct:['if'], sensor:['door_r','door_b'], action:['move','key_r','key_b'] }
+        },
+        {
+            id: 4, title: "L4: 複合判斷 (巢狀)",
+            concept: "工具介紹：巢狀結構 (Nesting)",
+            desc: "<b>敵機升級了！</b> 部分敵機擁有 <b>護盾(🛡️)</b>。<br>雷射無法穿透護盾，必須先用 EMP 破盾。",
+            detail: "<div class='concept-box'><b>邏輯積木是可以「層層包裹」的！</b><br>你可以在「如果發現敵人」的積木內部，再放入另一個「如果」積木，用來檢查該敵人是否有護盾。<br>提示：EMP 只能移除護盾，不會摧毀敵機。</div>",
+            map: [0, {t:2, s:true}, {t:2, s:false}, 0, {t:2, s:true}, 9],
+            tools: { struct:['if'], sensor:['enemy','shield'], action:['move','laser','emp'] }
+        },
+        {
+            id: 5, title: "L5: 循環挑戰",
+            concept: "工具介紹：循環直到 (While Loop)",
+            desc: "前方出現 <b>巨型隕石(☄️)</b>，它的裝甲很厚 (HP=3)，單次雷射無法清除。",
+            detail: "<div class='concept-box'>使用 <b>循環直到 (WHILE)</b> 積木。<br>只要條件成立 (例如：障礙物還存在)，它就會不斷重複執行內部的動作，直到障礙被清除為止。</div>",
+            map: [0, {t:5, hp:3}, 0, {t:5, hp:2}, 0, 9],
+            tools: { struct:['if','while'], sensor:['rock','clear'], action:['move','laser'] }
+        },
+        // --- 新增關卡 ---
+        {
+            id: 6, title: "L6: 重裝機甲",
+            concept: "挑戰：巢狀 + 循環 (Nested Loop)",
+            desc: "<b>警告！</b> 偵測到重裝敵機 (🛡️ + HP=3)。<br>你需要先破除護盾，然後持續攻擊直到摧毀它。",
+            detail: "<div class='concept-box'><b>思考模式：</b><br>1. 如果(敵人) -> 如果(護盾) { EMP } 否則 { 循環直到(敵人) { 雷射 } }<br>2. 這樣可以確保先破盾，下一輪再進入無盡的雷射攻擊。</div>",
+            map: [0, {t:2, s:true, hp:3}, 0, {t:2, s:false, hp:2}, 0, 9],
+            tools: { struct:['if','while'], sensor:['enemy','shield'], action:['move','laser','emp'] }
+        },
+        {
+            id: 7, title: "L7: 邏輯閘道",
+            concept: "挑戰：多重分支 + 循環",
+            desc: "複合地形區：包含紅門(🔴)、高強度隕石(☄️)與普通空域。",
+            detail: "<div class='concept-box'>你需要構建一個複雜的判斷樹：<br>如果是紅門 -> 開門<br>否則如果是障礙 -> 循環攻擊<br>否則 -> 前進</div>",
+            map: [0, 3, {t:5, hp:3}, 0, 3, {t:5, hp:2}, 9],
+            tools: { struct:['if','while'], sensor:['rock','door_r','clear'], action:['move','laser','key_r'] }
+        },
+        {
+            id: 8, title: "L8: 末日核心",
+            concept: "挑戰：終極邏輯 (Ultimate Logic)",
+            desc: "<b>最終測試：</b> 重裝敵機(🛡️)、巨型隕石(☄️)、紅門(🔴) 同時出現。",
+            detail: "<div class='concept-box'>你需要結合目前為止學到的所有技巧：<br>多重判斷 (Else If)、巢狀判斷 (Nested If)、以及循環 (While)。<br>祝你好運，指揮官。</div>",
+            map: [0, {t:2, s:true, hp:3}, 3, {t:5, hp:3}, {t:2, s:false, hp:2}, 9],
+            tools: { struct:['if','while'], sensor:['enemy','rock','door_r','shield','clear'], action:['move','laser','emp','key_r'] }
+        }
+    ];
+
+    const OBJ = {
+        0: { ch:' ', name:'空域' },
+        1: { ch:'🪨', name:'浮石' },
+        2: { ch:'👾', name:'敵機' },
+        3: { ch:'🚪', name:'紅門', style:'border-color:red; color:red' },
+        4: { ch:'🚪', name:'藍門', style:'border-color:cyan; color:cyan' },
+        5: { ch:'☄️', name:'巨石' },
+        9: { ch:'🏁', name:'基地' }
+    };
+
+    const TEXT_MAP = {
+        'if':'如果 (IF)', 'while':'循環 (WHILE)',
+        'rock':'障礙', 'enemy':'敵機', 'shield':'護盾', 'door_r':'紅門', 'door_b':'藍門', 'clear':'障礙存在',
+        'move':'前進', 'jump':'跳躍', 'laser':'雷射', 'emp':'EMP', 'key_r':'紅卡', 'key_b':'藍卡'
+    };
+
+    let curLvlIdx = 0;
+    let runtimeMap = [];
+    let isRunning = false;
+
+    // --- 初始化 ---
+    window.onload = () => loadLevel(0);
+
+    function loadLevel(idx) {
+        curLvlIdx = idx;
+        const d = LEVELS[idx];
+        document.getElementById('lvl-display').innerText = d.title;
+        document.getElementById('m-title').innerText = d.title;
+        document.getElementById('m-content').innerHTML = `<h3>${d.concept}</h3><p>${d.desc}</p>${d.detail}`;
+        document.getElementById('modal').style.display = 'flex';
+        renderToolbox(d.tools);
+        
+        // Fix: 地圖數據深拷貝並標準化
+        runtimeMap = JSON.parse(JSON.stringify(d.map)).map(item => {
+            return (typeof item === 'object') ? item : { t: item };
+        });
+
+        renderMap();
+        
+        // Fix: 每次載入關卡時，強制重置積木區
+        document.getElementById('root-container').innerHTML = `
+            <div class="main-loop-label">MAIN LOOP (無限重複)</div>
+            <div id="hint-text" style="color:#555; text-align:center; padding-top:80px; pointer-events:none;">
+                將 [結構積木] 拖曳至此處<br>建立你的邏輯樹
+            </div>
+        `;
+        
+        log(`系統載入關卡 ${idx+1}...`);
+    }
+
+    function renderToolbox(tools) {
+        const tStruct = document.getElementById('t-struct');
+        const tSensor = document.getElementById('t-sensor');
+        const tAction = document.getElementById('t-action');
+        tStruct.innerHTML = ''; tSensor.innerHTML = ''; tAction.innerHTML = '';
+        tools.struct.forEach(t => createTool(tStruct, 'struct', t));
+        tools.sensor.forEach(t => createTool(tSensor, 'sensor', t));
+        tools.action.forEach(t => createTool(tAction, 'action', t));
+    }
+
+    function createTool(container, type, val) {
+        const div = document.createElement('div');
+        let cls = type === 'struct' ? 'c-flow' : (type === 'sensor' ? 'c-sensor' : 'c-action');
+        div.className = `chip ${cls}`; div.draggable = true;
+        div.innerHTML = `<span>${TEXT_MAP[val]}</span>`;
+        div.ondragstart = (e) => drag(e, type, val);
+        container.appendChild(div);
+    }
+
+    function renderMap() {
+        const belt = document.getElementById('belt');
+        belt.innerHTML = ''; belt.style.transform = 'translateX(0px)';
+        runtimeMap.forEach((obj, i) => {
+            const type = (typeof obj === 'object') ? obj.t : obj;
+            const div = document.createElement('div');
+            div.className = 'cell'; div.id = `cell-${i}`;
+            let content = OBJ[type].ch;
+            let extras = '';
+            if (OBJ[type].style) div.style = OBJ[type].style;
+            if (typeof obj === 'object') {
+                if (obj.s) extras += `<div class="status-badge">🛡️</div>`;
+                if (obj.hp) extras += `<div class="hp-bar" style="display:block"><div class="hp-val" style="width:100%"></div></div>`;
+            }
+            div.innerHTML = `${extras}<div class="obj-vis">${content}</div>`;
+            belt.appendChild(div);
+        });
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+    function setTab(t) {
+        document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
+        document.querySelectorAll('.tools-content').forEach(e=>e.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById('t-'+t).classList.add('active');
+    }
+
+    // --- 拖放系統 ---
+    function drag(ev, type, val) { ev.dataTransfer.setData("type", type); ev.dataTransfer.setData("val", val); ev.stopPropagation(); }
+
+    document.addEventListener('dragover', (e) => {
+        if (e.target.dataset.type === 'container') { e.preventDefault(); e.stopPropagation(); e.target.classList.add('drag-hover'); }
+    });
+    document.addEventListener('dragleave', (e) => {
+        if (e.target.dataset.type === 'container') e.target.classList.remove('drag-hover');
+    });
+    document.addEventListener('drop', (e) => {
+        if (e.target.dataset.type === 'container') {
+            e.preventDefault(); e.stopPropagation(); e.target.classList.remove('drag-hover');
+            handleDrop(e.target, e);
+        }
+    });
+
+    window.removeNode = function(btn, event) {
+        if(event) event.stopPropagation();
+        const target = btn.closest('.block-struct') || btn.closest('.branch-row') || btn.closest('.chip');
+        if(target) target.remove();
+    }
+
+    function handleDrop(container, e) {
+        const type = e.dataTransfer.getData("type");
+        const val = e.dataTransfer.getData("val");
+        if (document.getElementById('hint-text')) document.getElementById('hint-text').style.display = 'none';
+
+        if (type === 'struct') {
+            const div = document.createElement('div');
+            div.dataset.logic = val;
+            if (val === 'if') {
+                div.className = `block-struct struct-if`;
+                div.innerHTML = `
+                    <div class="branch-row" data-branch="if">
+                        <div class="block-header">
+                            <span style="color:var(--cyan)">🔷 如果 (IF)</span>
+                            <div class="slot" data-accept="sensor">(條件?)</div>
+                            <span class="trash-btn" onclick="removeNode(this, event)">✖</span>
+                        </div>
+                        <div class="block-body" data-type="container"></div>
+                    </div>
+                    <div class="add-elif-btn" onclick="addElseIf(this)">➕ 否則如果 (Else If)</div>
+                    <div class="branch-row" data-branch="else">
+                        <div class="block-header" style="color:#888">ELSE (否則)</div>
+                        <div class="block-body" data-type="container"></div>
+                    </div>
+                `;
+            } else {
+                div.className = `block-struct struct-while`;
+                div.innerHTML = `
+                    <div class="block-header">
+                        <span style="color:var(--purple)">🔂 循環直到</span>
+                        <div class="slot" data-accept="sensor">(條件?)</div>
+                        <span class="trash-btn" onclick="removeNode(this, event)">✖</span>
+                    </div>
+                    <div class="block-body" data-type="container"></div>
+                `;
+            }
+            container.appendChild(div);
+            setupSlots(div);
+        } else if (type === 'action') {
+            const div = document.createElement('div');
+            div.className = 'chip c-action';
+            div.innerHTML = `<span>${TEXT_MAP[val]}</span> <span class="trash-btn" onclick="removeNode(this, event)" style="margin-left:auto">✖</span>`;
+            div.dataset.action = val; div.dataset.logic = 'action';
+            container.appendChild(div);
+        }
+    }
+
+    function addElseIf(btn) {
+        const parentBlock = btn.closest('.block-struct');
+        const newRow = document.createElement('div');
+        newRow.className = 'branch-row'; newRow.dataset.branch = 'elseif';
+        newRow.innerHTML = `
+            <div class="block-header">
+                <span style="color:var(--cyan)">🔷 否則如果</span>
+                <div class="slot" data-accept="sensor">(條件?)</div>
+                <span class="trash-btn" onclick="removeNode(this, event)">✖</span>
+            </div>
+            <div class="block-body" data-type="container"></div>
+        `;
+        parentBlock.insertBefore(newRow, btn);
+        setupSlots(newRow);
+    }
+
+    function setupSlots(parent) {
+        parent.querySelectorAll('.slot').forEach(slot => {
+            if(slot.dataset.init) return;
+            slot.dataset.init = "true";
+            slot.ondragover = (e) => { e.preventDefault(); slot.classList.add('drag-hover'); };
+            slot.ondragleave = () => slot.classList.remove('drag-hover');
+            slot.ondrop = (e) => {
+                e.preventDefault(); e.stopPropagation(); slot.classList.remove('drag-hover');
+                if (e.dataTransfer.getData("type") !== 'sensor') return;
+                const val = e.dataTransfer.getData("val");
+                slot.innerHTML = `<span style="color:var(--cyan)">${TEXT_MAP[val]}</span>`;
+                slot.dataset.val = val; slot.classList.add('filled');
+            };
+            slot.onclick = () => { slot.innerHTML = '(條件?)'; delete slot.dataset.val; slot.classList.remove('filled'); };
+        });
+    }
+
+    // --- 邏輯樹解析 (Nested Logic Fix) ---
+    function parseLogic(container) {
+        const steps = [];
+        for (let child of container.children) {
+            const logic = child.dataset.logic;
+            
+            if (logic === 'action') {
+                steps.push({ type: 'action', act: child.dataset.action });
+            } 
+            else if (logic === 'if') {
+                const branches = [];
+                let elseBody = [];
+
+                // 僅遍歷直接子元素，避免抓到內層嵌套
+                for (let row of child.children) {
+                    if (row.classList.contains('branch-row')) {
+                        const bType = row.dataset.branch;
+                        const slot = row.querySelector('.slot');
+                        const bodyContainer = row.querySelector('.block-body');
+
+                        if (bType === 'if' || bType === 'elseif') {
+                            const sensor = slot ? slot.dataset.val : null;
+                            const body = parseLogic(bodyContainer);
+                            branches.push({ sensor, body });
+                        } else if (bType === 'else') {
+                            elseBody = parseLogic(bodyContainer);
+                        }
+                    }
+                }
+                steps.push({ type: 'multi-if', branches, elseBody });
+            } 
+            else if (logic === 'while') {
+                const sensor = child.querySelector('.slot').dataset.val;
+                const body = parseLogic(child.querySelector('.block-body'));
+                steps.push({ type: 'while', sensor, body });
+            }
+        }
+        return steps;
+    }
+
+    // --- 引擎執行區 ---
+    async function runCode() {
+        if (isRunning) return;
+        const root = document.getElementById('root-container');
+        const logicTree = parseLogic(root);
+        if (logicTree.length === 0) { alert("請先拖入積木！"); return; }
+        
+        isRunning = true;
+        log("--- 開始執行 ---");
+        
+        let i = 0;
+        let cycles = 0; 
+
+        while (i < runtimeMap.length) {
+            cycles++;
+            if(cycles > 200) { log("系統強制停止：循環過久", 'l-err'); isRunning = false; return; }
+
+            // 視覺更新
+            document.getElementById('belt').style.transform = `translateX(${-i * 100}px)`;
+            
+            const objData = runtimeMap[i];
+            log(`[Pos ${i}] 掃描: ${OBJ[objData.t].name}`);
+            await sleep(500);
+            
+            if (objData.t === 9) {
+                log("任務完成！", 'l-ok'); setTimeout(() => nextLevel(), 1000); isRunning = false; return;
+            }
+
+            // 執行邏輯
+            const res = await executeBlock(logicTree, objData, i);
+            
+            if (res === 'crash') {
+                log("無人機損毀！", 'l-err'); alert("任務失敗！"); isRunning = false; return;
+            } else if (res === 'moved') {
+                i++;
+            } else {
+                log("等待下一指令...", 'l-warn');
+                await sleep(200);
+            }
+        }
+        isRunning = false;
+    }
+
+    async function executeBlock(steps, obj, idx) {
+        for (let step of steps) {
+            if (step.type === 'action') {
+                const r = await performAction(step.act, obj, idx);
+                if (r === 'moved' || r === 'crash') return r;
+                if (r === 'continue') return 'continue';
+            }
+            else if (step.type === 'multi-if') {
+                let matched = false;
+                for (let branch of step.branches) {
+                    if (checkSensor(branch.sensor, obj)) {
+                        matched = true;
+                        const r = await executeBlock(branch.body, obj, idx);
+                        if (r !== 'pass') return r;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    const r = await executeBlock(step.elseBody, obj, idx);
+                    if (r !== 'pass') return r;
+                }
+            }
+            else if (step.type === 'while') {
+                let safety = 0;
+                while (checkSensor(step.sensor, obj)) {
+                    safety++; if (safety > 15) return 'crash';
+                    log(`循環中...(${TEXT_MAP[step.sensor]})`);
+                    const r = await executeBlock(step.body, obj, idx);
+                    if (r === 'moved' || r === 'crash') return r;
+                    await sleep(400);
+                }
+            }
+        }
+        return 'pass';
+    }
+
+    async function performAction(act, obj, idx) {
+        log(`執行: ${TEXT_MAP[act]}`);
+        animateDrone(act);
+        await sleep(300);
+
+        if (act === 'move') {
+            if (obj.t === 0) return 'moved';
+            if ((obj.hp && obj.hp > 0) || [1,2,3,4,5].includes(obj.t)) return 'crash';
+            return 'moved';
+        }
+        if (act === 'laser') {
+            if (obj.s) { log("護盾反彈！", 'l-err'); return 'continue'; }
+            else if (obj.hp) {
+                obj.hp--; updateVisual(idx, obj); log(`命中 HP:${obj.hp}`, 'l-warn');
+                if (obj.hp <= 0) { obj.t = 0; updateVisual(idx, obj); }
+                return 'continue';
+            }
+            else if (obj.t === 2) { 
+                obj.t = 0; 
+                updateVisual(idx, obj); 
+                log("敵機摧毀", 'l-ok'); 
+                return 'continue'; 
+            }
+        }
+        else if (act === 'emp') { 
+            if(obj.s){ obj.s=false; updateVisual(idx, obj); log("護盾癱瘓", 'l-warn'); }
+            return 'continue';
+        }
+        else if (act === 'jump') { return (obj.t===1)? 'moved' : 'crash'; }
+        else if (act === 'key_r' && obj.t===3) { obj.t=0; updateVisual(idx, obj); log("紅門開啟", 'l-ok'); return 'continue'; }
+        else if (act === 'key_b' && obj.t===4) { obj.t=0; updateVisual(idx, obj); log("藍門開啟", 'l-ok'); return 'continue'; }
+        
+        return 'continue';
+    }
+
+    function checkSensor(sensor, obj) {
+        if (!sensor) return false;
+        if (sensor === 'enemy') return (obj.t === 2 || obj.t === 4) && (!obj.hp || obj.hp > 0);
+        if (sensor === 'rock') return (obj.t === 1 || obj.t === 5) && (!obj.hp || obj.hp > 0);
+        if (sensor === 'shield') return obj.s === true;
+        if (sensor === 'door_r') return obj.t === 3;
+        if (sensor === 'door_b') return obj.t === 4;
+        if (sensor === 'clear') return obj.t !== 0;
+        return false;
+    }
+
+    function updateVisual(idx, obj) {
+        const cell = document.getElementById(`cell-${idx}`);
+        if (obj.hp !== undefined) {
+            const bar = cell.querySelector('.hp-val');
+            let max = (obj.t === 5) ? 3 : 5;
+            if (bar) bar.style.width = `${(obj.hp/max)*100}%`;
+        }
+        const badge = cell.querySelector('.status-badge');
+        if (badge) badge.style.display = obj.s ? 'block' : 'none';
+        if (obj.t === 0) {
+            cell.querySelector('.obj-vis').innerText = '';
+            if(cell.querySelector('.hp-bar')) cell.querySelector('.hp-bar').style.display = 'none';
+            if(badge) badge.style.display = 'none';
+        }
+    }
+
+    function animateDrone(act) {
+        const d = document.querySelector('.scanner-frame'); d.style.transition = '0.1s';
+        if (act === 'laser' || act === 'emp') d.style.borderColor = 'red';
+        else if (act === 'move') d.style.transform = 'translate(-40%, -50%)';
+        else if (act === 'jump') d.style.transform = 'translate(-50%, -65%)';
+        setTimeout(() => { d.style.borderColor = 'var(--green)'; d.style.transform = 'translate(-50%, -50%)'; }, 200);
+    }
+
+    function log(msg, cls) { const c = document.getElementById('console'); c.innerHTML += `<div class="log-line ${cls||''}">${msg}</div>`; c.scrollTop = c.scrollHeight; }
+    function nextLevel() { if(curLvlIdx<LEVELS.length-1){ if(confirm("下一關？")) loadLevel(curLvlIdx+1); } else alert("通關！"); }
+    function resetLevel() { isRunning = false; loadLevel(curLvlIdx); }
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+</script>
+</body>
+</html>
