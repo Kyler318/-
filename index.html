@@ -232,12 +232,16 @@
 </div>
 
 <script>
+    // --- 儲存機制 Key ---
+    const KEY_LEVEL = 'doom_level_idx';
+    const KEY_CODE = 'doom_user_code';
+
     // --- 關卡數據 (Level 6, 7, 8 為新增關卡) ---
     const LEVELS = [
         {
             id: 1, title: "L1: 基礎判斷",
             concept: "工具介紹：如果...否則...",
-            desc: "前方道路上有 <b>浮石(🪨)</b> 阻擋，你需要讓無人機做出正確的反應。",
+            desc: "前方道路上有 <b>浮石(🗿)</b> 阻擋，你需要讓無人機做出正確的反應。",
             detail: "<div class='concept-box'>使用 <b>如果 (IF)</b> 積木來檢查感測器條件。<br>當條件成立時，會執行積木內部的動作；<br>如果條件不成立，則執行 <b>ELSE (否則)</b> 區塊中的動作。</div>",
             map: [0, 1, 0, 1, 0, 0, 9], 
             tools: { struct:['if'], sensor:['rock'], action:['move','jump'] }
@@ -274,7 +278,6 @@
             map: [0, {t:5, hp:3}, 0, {t:5, hp:2}, 0, 9],
             tools: { struct:['if','while'], sensor:['rock','clear'], action:['move','laser'] }
         },
-        // --- 新增關卡 ---
         {
             id: 6, title: "L6: 重裝機甲",
             concept: "挑戰：巢狀 + 循環 (Nested Loop)",
@@ -301,9 +304,10 @@
         }
     ];
 
+    // [修改點 1] 將 🪨 改為 🗿
     const OBJ = {
         0: { ch:' ', name:'空域' },
-        1: { ch:'🪨', name:'浮石' },
+        1: { ch:'🗿', name:'浮石' },
         2: { ch:'👾', name:'敵機' },
         3: { ch:'🚪', name:'紅門', style:'border-color:red; color:red' },
         4: { ch:'🚪', name:'藍門', style:'border-color:cyan; color:cyan' },
@@ -320,12 +324,60 @@
     let curLvlIdx = 0;
     let runtimeMap = [];
     let isRunning = false;
+    let autoSaveObserver = null;
 
-    // --- 初始化 ---
-    window.onload = () => loadLevel(0);
+    // --- 初始化與自動讀取 ---
+    window.onload = () => {
+        // [修改點 3] 讀取 LocalStorage
+        const savedLevel = localStorage.getItem(KEY_LEVEL);
+        const savedCode = localStorage.getItem(KEY_CODE);
+        
+        if (savedLevel !== null) {
+            // 如果有存檔，載入對應關卡並恢復代碼
+            curLvlIdx = parseInt(savedLevel);
+            loadLevel(curLvlIdx, true); // true = 保留代碼區不被清空
+            if (savedCode && savedCode.trim() !== "") {
+                const root = document.getElementById('root-container');
+                root.innerHTML = savedCode;
+                restoreListeners(root); // 恢復事件監聽
+            }
+            log(`已恢復上次進度：關卡 ${curLvlIdx+1}`);
+        } else {
+            loadLevel(0);
+        }
 
-    function loadLevel(idx) {
+        // 啟動自動存檔監聽器
+        initAutoSave();
+    };
+
+    function initAutoSave() {
+        const root = document.getElementById('root-container');
+        if(autoSaveObserver) autoSaveObserver.disconnect();
+        
+        autoSaveObserver = new MutationObserver(() => {
+            localStorage.setItem(KEY_CODE, root.innerHTML);
+        });
+        
+        autoSaveObserver.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
+    }
+
+    // 恢復動態生成的元素的事件綁定
+    function restoreListeners(container) {
+        // 恢復 Slot 的事件
+        container.querySelectorAll('.slot').forEach(slot => {
+            // 移除可能存在的舊標記以便重新綁定
+            delete slot.dataset.init; 
+            // 重新執行 setupLogic (這裡直接重用 setupSlots 函數)
+        });
+        // 對所有結構塊重新執行 setupSlots
+        container.querySelectorAll('.block-struct, .branch-row').forEach(block => setupSlots(block));
+    }
+
+    // [修改點 2] loadLevel 增加 preserveCode 參數
+    function loadLevel(idx, preserveCode = false) {
         curLvlIdx = idx;
+        localStorage.setItem(KEY_LEVEL, curLvlIdx); // 存檔當前關卡
+
         const d = LEVELS[idx];
         document.getElementById('lvl-display').innerText = d.title;
         document.getElementById('m-title').innerText = d.title;
@@ -333,20 +385,23 @@
         document.getElementById('modal').style.display = 'flex';
         renderToolbox(d.tools);
         
-        // Fix: 地圖數據深拷貝並標準化
         runtimeMap = JSON.parse(JSON.stringify(d.map)).map(item => {
             return (typeof item === 'object') ? item : { t: item };
         });
 
         renderMap();
         
-        // Fix: 每次載入關卡時，強制重置積木區
-        document.getElementById('root-container').innerHTML = `
-            <div class="main-loop-label">MAIN LOOP (無限重複)</div>
-            <div id="hint-text" style="color:#555; text-align:center; padding-top:80px; pointer-events:none;">
-                將 [結構積木] 拖曳至此處<br>建立你的邏輯樹
-            </div>
-        `;
+        // 只有在不保留代碼時才清空編輯區 (例如切換新關卡)
+        if (!preserveCode) {
+            document.getElementById('root-container').innerHTML = `
+                <div class="main-loop-label">MAIN LOOP (無限重複)</div>
+                <div id="hint-text" style="color:#555; text-align:center; padding-top:80px; pointer-events:none;">
+                    將 [結構積木] 拖曳至此處<br>建立你的邏輯樹
+                </div>
+            `;
+            // 清空存檔中的代碼
+            localStorage.setItem(KEY_CODE, document.getElementById('root-container').innerHTML);
+        }
         
         log(`系統載入關卡 ${idx+1}...`);
     }
@@ -484,8 +539,10 @@
 
     function setupSlots(parent) {
         parent.querySelectorAll('.slot').forEach(slot => {
-            if(slot.dataset.init) return;
+            // 如果已經初始化過，這裡可以選擇跳過，但為了 restoreListeners，我們允許重新綁定
+            // if(slot.dataset.init) return; 
             slot.dataset.init = "true";
+            
             slot.ondragover = (e) => { e.preventDefault(); slot.classList.add('drag-hover'); };
             slot.ondragleave = () => slot.classList.remove('drag-hover');
             slot.ondrop = (e) => {
@@ -546,6 +603,9 @@
         const logicTree = parseLogic(root);
         if (logicTree.length === 0) { alert("請先拖入積木！"); return; }
         
+        // 執行時也存檔一次
+        localStorage.setItem(KEY_CODE, root.innerHTML);
+
         isRunning = true;
         log("--- 開始執行 ---");
         
@@ -689,11 +749,22 @@
     }
 
     function log(msg, cls) { const c = document.getElementById('console'); c.innerHTML += `<div class="log-line ${cls||''}">${msg}</div>`; c.scrollTop = c.scrollHeight; }
-    function nextLevel() { if(curLvlIdx<LEVELS.length-1){ if(confirm("下一關？")) loadLevel(curLvlIdx+1); } else alert("通關！"); }
-    function resetLevel() { isRunning = false; loadLevel(curLvlIdx); }
+    
+    // [修改點 2] nextLevel 默認不保留代碼 (新關卡清空)
+    function nextLevel() { 
+        if(curLvlIdx < LEVELS.length-1){ 
+            if(confirm("下一關？")) loadLevel(curLvlIdx+1, false); 
+        } else alert("通關！"); 
+    }
+    
+    // [修改點 2] resetLevel 呼叫 loadLevel 並傳入 true 以保留代碼
+    function resetLevel() { 
+        isRunning = false; 
+        loadLevel(curLvlIdx, true); 
+    }
+    
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 </script>
 </body>
-
 </html>
