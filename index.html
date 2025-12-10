@@ -236,7 +236,7 @@
     const KEY_LEVEL = 'doom_level_idx';
     const KEY_CODE = 'doom_user_code';
 
-    // --- 關卡數據 (Level 6, 7, 8 為新增關卡) ---
+    // --- 關卡數據 ---
     const LEVELS = [
         {
             id: 1, title: "L1: 基礎判斷",
@@ -304,7 +304,6 @@
         }
     ];
 
-    // [修改點 1] 將 🪨 改為 🗿
     const OBJ = {
         0: { ch:' ', name:'空域' },
         1: { ch:'🗿', name:'浮石' },
@@ -325,28 +324,26 @@
     let runtimeMap = [];
     let isRunning = false;
     let autoSaveObserver = null;
+    let activeExecId = 0; // [新增] 用於控制程式終止的唯一 ID
 
     // --- 初始化與自動讀取 ---
     window.onload = () => {
-        // [修改點 3] 讀取 LocalStorage
         const savedLevel = localStorage.getItem(KEY_LEVEL);
         const savedCode = localStorage.getItem(KEY_CODE);
         
         if (savedLevel !== null) {
-            // 如果有存檔，載入對應關卡並恢復代碼
             curLvlIdx = parseInt(savedLevel);
-            loadLevel(curLvlIdx, true); // true = 保留代碼區不被清空
+            loadLevel(curLvlIdx, true); 
             if (savedCode && savedCode.trim() !== "") {
                 const root = document.getElementById('root-container');
                 root.innerHTML = savedCode;
-                restoreListeners(root); // 恢復事件監聽
+                restoreListeners(root); 
             }
             log(`已恢復上次進度：關卡 ${curLvlIdx+1}`);
         } else {
             loadLevel(0);
         }
 
-        // 啟動自動存檔監聽器
         initAutoSave();
     };
 
@@ -361,22 +358,16 @@
         autoSaveObserver.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
     }
 
-    // 恢復動態生成的元素的事件綁定
     function restoreListeners(container) {
-        // 恢復 Slot 的事件
         container.querySelectorAll('.slot').forEach(slot => {
-            // 移除可能存在的舊標記以便重新綁定
             delete slot.dataset.init; 
-            // 重新執行 setupLogic (這裡直接重用 setupSlots 函數)
         });
-        // 對所有結構塊重新執行 setupSlots
         container.querySelectorAll('.block-struct, .branch-row').forEach(block => setupSlots(block));
     }
 
-    // [修改點 2] loadLevel 增加 preserveCode 參數
     function loadLevel(idx, preserveCode = false) {
         curLvlIdx = idx;
-        localStorage.setItem(KEY_LEVEL, curLvlIdx); // 存檔當前關卡
+        localStorage.setItem(KEY_LEVEL, curLvlIdx); 
 
         const d = LEVELS[idx];
         document.getElementById('lvl-display').innerText = d.title;
@@ -391,7 +382,6 @@
 
         renderMap();
         
-        // 只有在不保留代碼時才清空編輯區 (例如切換新關卡)
         if (!preserveCode) {
             document.getElementById('root-container').innerHTML = `
                 <div class="main-loop-label">MAIN LOOP (無限重複)</div>
@@ -399,7 +389,6 @@
                     將 [結構積木] 拖曳至此處<br>建立你的邏輯樹
                 </div>
             `;
-            // 清空存檔中的代碼
             localStorage.setItem(KEY_CODE, document.getElementById('root-container').innerHTML);
         }
         
@@ -469,9 +458,18 @@
     });
 
     window.removeNode = function(btn, event) {
-        if(event) event.stopPropagation();
-        const target = btn.closest('.block-struct') || btn.closest('.branch-row') || btn.closest('.chip');
-        if(target) target.remove();
+        if (event) event.stopPropagation();
+
+        const chip = btn.closest('.chip');
+        if (chip) { chip.remove(); return; }
+
+        const row = btn.closest('.branch-row');
+        if (row) {
+            if (row.dataset.branch === 'elseif') { row.remove(); return; }
+        }
+
+        const struct = btn.closest('.block-struct');
+        if (struct) { struct.remove(); }
     }
 
     function handleDrop(container, e) {
@@ -539,10 +537,7 @@
 
     function setupSlots(parent) {
         parent.querySelectorAll('.slot').forEach(slot => {
-            // 如果已經初始化過，這裡可以選擇跳過，但為了 restoreListeners，我們允許重新綁定
-            // if(slot.dataset.init) return; 
             slot.dataset.init = "true";
-            
             slot.ondragover = (e) => { e.preventDefault(); slot.classList.add('drag-hover'); };
             slot.ondragleave = () => slot.classList.remove('drag-hover');
             slot.ondrop = (e) => {
@@ -556,26 +551,20 @@
         });
     }
 
-    // --- 邏輯樹解析 (Nested Logic Fix) ---
     function parseLogic(container) {
         const steps = [];
         for (let child of container.children) {
             const logic = child.dataset.logic;
-            
             if (logic === 'action') {
                 steps.push({ type: 'action', act: child.dataset.action });
-            } 
-            else if (logic === 'if') {
+            } else if (logic === 'if') {
                 const branches = [];
                 let elseBody = [];
-
-                // 僅遍歷直接子元素，避免抓到內層嵌套
                 for (let row of child.children) {
                     if (row.classList.contains('branch-row')) {
                         const bType = row.dataset.branch;
                         const slot = row.querySelector('.slot');
                         const bodyContainer = row.querySelector('.block-body');
-
                         if (bType === 'if' || bType === 'elseif') {
                             const sensor = slot ? slot.dataset.val : null;
                             const body = parseLogic(bodyContainer);
@@ -586,8 +575,7 @@
                     }
                 }
                 steps.push({ type: 'multi-if', branches, elseBody });
-            } 
-            else if (logic === 'while') {
+            } else if (logic === 'while') {
                 const sensor = child.querySelector('.slot').dataset.val;
                 const body = parseLogic(child.querySelector('.block-body'));
                 steps.push({ type: 'while', sensor, body });
@@ -596,15 +584,18 @@
         return steps;
     }
 
-    // --- 引擎執行區 ---
+    // --- 引擎執行區 (修正版) ---
     async function runCode() {
         if (isRunning) return;
         const root = document.getElementById('root-container');
         const logicTree = parseLogic(root);
         if (logicTree.length === 0) { alert("請先拖入積木！"); return; }
         
-        // 執行時也存檔一次
         localStorage.setItem(KEY_CODE, root.innerHTML);
+
+        // [Fix] 生成新的執行 ID
+        activeExecId++; 
+        const currentExecId = activeExecId;
 
         isRunning = true;
         log("--- 開始執行 ---");
@@ -613,23 +604,27 @@
         let cycles = 0; 
 
         while (i < runtimeMap.length) {
+            // 檢查 ID，如果不符則立刻停止
+            if (activeExecId !== currentExecId) return;
+
             cycles++;
             if(cycles > 200) { log("系統強制停止：循環過久", 'l-err'); isRunning = false; return; }
 
-            // 視覺更新
             document.getElementById('belt').style.transform = `translateX(${-i * 100}px)`;
             
             const objData = runtimeMap[i];
             log(`[Pos ${i}] 掃描: ${OBJ[objData.t].name}`);
             await sleep(500);
+            if (activeExecId !== currentExecId) return; // 再次檢查
             
             if (objData.t === 9) {
                 log("任務完成！", 'l-ok'); setTimeout(() => nextLevel(), 1000); isRunning = false; return;
             }
 
-            // 執行邏輯
-            const res = await executeBlock(logicTree, objData, i);
+            // 傳遞 currentExecId 進入遞歸
+            const res = await executeBlock(logicTree, objData, i, currentExecId);
             
+            if (res === 'stop') return; // 接收到停止信號
             if (res === 'crash') {
                 log("無人機損毀！", 'l-err'); alert("任務失敗！"); isRunning = false; return;
             } else if (res === 'moved') {
@@ -642,35 +637,40 @@
         isRunning = false;
     }
 
-    async function executeBlock(steps, obj, idx) {
+    async function executeBlock(steps, obj, idx, execId) {
+        if (activeExecId !== execId) return 'stop';
+
         for (let step of steps) {
+            if (activeExecId !== execId) return 'stop';
+
             if (step.type === 'action') {
-                const r = await performAction(step.act, obj, idx);
-                if (r === 'moved' || r === 'crash') return r;
-                if (r === 'continue') return 'continue';
+                const r = await performAction(step.act, obj, idx, execId);
+                if (r === 'moved' || r === 'crash' || r === 'stop') return r;
+                if (r === 'continue') continue;
             }
             else if (step.type === 'multi-if') {
                 let matched = false;
                 for (let branch of step.branches) {
                     if (checkSensor(branch.sensor, obj)) {
                         matched = true;
-                        const r = await executeBlock(branch.body, obj, idx);
+                        const r = await executeBlock(branch.body, obj, idx, execId);
                         if (r !== 'pass') return r;
                         break;
                     }
                 }
                 if (!matched) {
-                    const r = await executeBlock(step.elseBody, obj, idx);
+                    const r = await executeBlock(step.elseBody, obj, idx, execId);
                     if (r !== 'pass') return r;
                 }
             }
             else if (step.type === 'while') {
                 let safety = 0;
                 while (checkSensor(step.sensor, obj)) {
+                    if (activeExecId !== execId) return 'stop';
                     safety++; if (safety > 15) return 'crash';
                     log(`循環中...(${TEXT_MAP[step.sensor]})`);
-                    const r = await executeBlock(step.body, obj, idx);
-                    if (r === 'moved' || r === 'crash') return r;
+                    const r = await executeBlock(step.body, obj, idx, execId);
+                    if (r === 'moved' || r === 'crash' || r === 'stop') return r;
                     await sleep(400);
                 }
             }
@@ -678,10 +678,12 @@
         return 'pass';
     }
 
-    async function performAction(act, obj, idx) {
+    async function performAction(act, obj, idx, execId) {
+        if (activeExecId !== execId) return 'stop';
         log(`執行: ${TEXT_MAP[act]}`);
         animateDrone(act);
         await sleep(300);
+        if (activeExecId !== execId) return 'stop';
 
         if (act === 'move') {
             if (obj.t === 0) return 'moved';
@@ -726,6 +728,7 @@
 
     function updateVisual(idx, obj) {
         const cell = document.getElementById(`cell-${idx}`);
+        if (!cell) return; // 防止重置後找不到元素報錯
         if (obj.hp !== undefined) {
             const bar = cell.querySelector('.hp-val');
             let max = (obj.t === 5) ? 3 : 5;
@@ -750,15 +753,15 @@
 
     function log(msg, cls) { const c = document.getElementById('console'); c.innerHTML += `<div class="log-line ${cls||''}">${msg}</div>`; c.scrollTop = c.scrollHeight; }
     
-    // [修改點 2] nextLevel 默認不保留代碼 (新關卡清空)
     function nextLevel() { 
         if(curLvlIdx < LEVELS.length-1){ 
             if(confirm("下一關？")) loadLevel(curLvlIdx+1, false); 
         } else alert("通關！"); 
     }
     
-    // [修改點 2] resetLevel 呼叫 loadLevel 並傳入 true 以保留代碼
     function resetLevel() { 
+        // [Fix] 增加 ID，讓舊的程式循環因為 ID 不符而自動退出
+        activeExecId++;
         isRunning = false; 
         loadLevel(curLvlIdx, true); 
     }
